@@ -1,0 +1,330 @@
+---
+title: "Statistical Learning HW5"
+author: "Isaac Ahern"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS) # for LDA lda()
+library(class) # for NearestNeighbors knn()
+library(knitr) # for kable
+library(boot) # for bootstrap
+```
+
+### Problems
+
+
+1.  Evaluate the methods of classification we have discussed using class-validation for the data at pages.uoregon.edu/~dlevin/DATA/ozo.txt.  The response variance is HO, which indicates whether a given day had high ozone levels or not.  Discuss the success or failures of these methods.
+ 
+
+2. The standard errors in linear regression are based on the assumption that the errors are independent, have the same variance, and have a Normal distribution.
+
+(a) Simulate data where the errors are not Normal, e.g. come from a t-distribution with 3 degrees of freedom.  (The t-distribution is like the normal, but has larger probabilities of extreme data points.)  (Use rt in R to simulate.  Assume the model is y = 3 + 3x + error, where there are 100 x's spread between 0 and 3.)
+
+(b) Fit a linear model, and compare the standard errors of the fitted coefficients to the standard errors estimated by the bootstrap method.
+
+(c) Now simulate where the errors are correlated. (We will discuss in class how to do that.)  Compare the standard errors reported by the regression output (for the coefficients) to the bootstrap-estimated standard errors.
+
+
+.....
+
+.....
+
+
+1. We will examine the classification methods: Logistic Regression, LDA (Linear Discriminant Analysis), and $k-$Nearest Neighbors on the ozo dataset (classifying whether days had high or low ozone levels). We will compare the average error rate of cross-validated model fitting from each area, to compare relative success rates of the techniques. In particular, we optimize the error rate in $k-$Nearest Neighbors with respect to choice of neighbor size. For details, see the associated R markdown file.
+
+```{r initialize_data, echo=FALSE, warning=FALSE}
+
+#import and view data
+ozo = read.table(file="http://pages.uoregon.edu/dlevin/DATA/ozo.txt",header=TRUE,row.names=1)
+attach(ozo)
+
+#plot(vh,wind,col=humidity,pch=19) #looking at data
+
+
+set.seed(2) # for analysis reproducibility in case of random neighbor tie - breaking
+# Note: possible that a bad seed will cause a confusion matrix to bcomee degenerate
+# if all predictions are only one of TRUE or FALSE. 
+# Due to how it was coded, this can pass a subtle error.
+
+
+#The first step is to figure out how to divide into k parts. 
+#There are many ways to do this. 
+#One trick is to randomize the order of the rows, and then 
+#take contiguous chunks:
+n = dim(ozo)[1]
+ozor = ozo[sample(1:n,n,replace=FALSE),]
+k = 10 #cross validation order
+j.breaks = seq(1,by = I(n/k),length.out=I(k+1))
+j.breaks[I(k+1)] = n
+train.d = vector("list",k); test.d = vector("list",k)
+for(i in 1:k){
+  jj = j.breaks[i]:j.breaks[i+1]
+  test.d[[i]] = ozor[jj,]
+  train.d[[i]] = ozor[-jj,] 
+}
+
+#  initialize error vector
+errorRate_list <- 1:k 
+
+```
+
+```{r logistic_regression, echo=FALSE, warning=FALSE}
+
+## Logistic Regression 
+
+for(i in 1:k){
+ 
+  train.frame <- train.d[[i]] #train on    train.d[i]
+  test.frame <- test.d[[i]]
+  
+#  attach(train.frame)   #unnecessary
+  
+  #build model
+  logmodel <- glm( HO ~ . , data = train.frame, family=binomial)
+  #model_list[i] <- logmodel
+  
+  # test on   test.frame
+  predictions <- round(predict(logmodel, newdata = test.frame, type="response"))
+  
+    for(j in 1:length(predictions)) {
+      if (predictions[j] == 1) {predictions[j] = "TRUE"} else { predictions[j] = "FALSE"}
+    } 
+  
+  confusionMatrix <- table(predictions, test.frame$HO)
+  #print(confusionMatrix)
+  
+  errorRate_list[i] <- (confusionMatrix[2] + confusionMatrix[3])/(sum(confusionMatrix))
+  # confusion matrix is a list of 2-dim vectors, this picks out the off diagonal (error) terms
+  
+}
+
+#overall error rate of logistic regression 
+errorRate_logistic <- sum(errorRate_list)/k
+
+```
+
+```{r lda, echo=FALSE, warning=FALSE}
+
+## LDA 
+
+for(i in 1:k){
+  
+  train.frame <- train.d[[i]] #train on    train.d[i]
+  test.frame <- test.d[[i]]
+  
+  #  attach(train.frame)   #unnecessary
+  
+  #build model
+  lda.fit <- lda( HO ~ . , data = train.frame)
+  #model_list[i] <- logmodel
+  
+  # test on   test.frame
+  lda.pred=predict(lda.fit, test.frame)
+
+  predictions <- lda.pred$class # class = predictions from the lda model predict() function
+  
+  confusionMatrix <- table(predictions, test.frame$HO)
+  #print(confusionMatrix)
+  
+  errorRate_list[i] <- (confusionMatrix[2] + confusionMatrix[3])/(sum(confusionMatrix))
+  # confusion matrix is a list of 2-dim vectors, this picks out the off diagonal (error) terms
+  
+}
+
+#overall error rate of LDA 
+errorRate_lda <- sum(errorRate_list)/k
+
+```
+
+```{r knn, echo=FALSE, warning=FALSE}
+
+## K Nearest Neighbors 
+
+    #OPTIMISING KNN
+    MaxNeighborSize = 25
+    errorRate_N = 1:MaxNeighborSize # vector of KNN error rates to find optimal neighbor size
+    
+    for(N in 1:MaxNeighborSize){
+      neighbor = N
+      for(i in 1:k){
+        
+        train.frame <- train.d[[i]] #train on    train.d[i]
+        test.frame <- test.d[[i]]
+        
+        predictions = knn(train.frame, test.frame, train.frame$HO , k=neighbor)
+        
+        confusionMatrix <- table(predictions, test.frame$HO)
+        #    print(confusionMatrix)
+        
+        errorRate_list[i] <- (confusionMatrix[2] + confusionMatrix[3])/(sum(confusionMatrix))
+        # confusion matrix is a list of 2-dim vectors, this picks out the off diagonal (error) terms
+        
+      }
+      errorRate_N[N] <- sum(errorRate_list)/k
+    }
+    inputs = 1:MaxNeighborSize
+    errors = errorRate_N
+    
+    error_v_neighbor_plot <- plot(x = inputs, y = errors, ylim=c(0.14,.2), main = "Average Error Rate vs Neighbor Size", xlab = "neighbor size" , ylab = "average error rate")  # visual inspection of error vs neighbor size.
+
+    
+    # optimalSize reports the minimal error choice.
+    optimalSize <- inputs[which.min(errors)]
+
+# Compute KNN predictions
+
+# Fix number of nearest neighbors 'neighbor' 
+neighbor = optimalSize
+
+for(i in 1:k){
+  
+  train.frame <- train.d[[i]] #train on    train.d[i]
+  test.frame <- test.d[[i]]
+  
+  predictions = knn(train.frame, test.frame, train.frame$HO ,k=neighbor)
+  
+  confusionMatrix <- table(predictions, test.frame$HO)
+  #print(confusionMatrix)
+  
+  errorRate_list[i] <- (confusionMatrix[2] + confusionMatrix[3])/(sum(confusionMatrix))
+  # confusion matrix is a list of 2-dim vectors, this picks out the off diagonal (error) terms
+  
+}
+
+errorRate_knn <- sum(errorRate_list)/k
+    
+```
+
+`r error_v_neighbor_plot`
+
+Fitting all 3 ml prediction models, we arrive at a 10-fold cross validated error rates:
+
+## Error Comparison Table
+
+```{r error_comparison, echo=FALSE, warning=FALSE}
+
+comparison_table <-  matrix(
+    data = c(errorRate_logistic, "", errorRate_lda, "", errorRate_knn, paste("k =", optimalSize, sep = " ") ) , 
+    nrow=2, ncol=3)
+colnames(comparison_table) <- c("Logistic Regression", "LDA", "k Nearest Neighbors")
+rownames(comparison_table) <- c("Average Error Rates", "Optimal Parameters")
+```
+
+`r kable(comparison_table)`
+
+2. 
+  (a) 
+Simulate data where the errors are not Normal, e.g. come from a t-distribution with 3 degrees of freedom.(Assume the model is $y = 3 + 3x + \text{error}$, where there are 100 x’s spread between 0 and 3.)
+  
+```{r t_distribution, echo=FALSE, warning=FALSE}
+#set.seed(1)
+
+error = rt(n = 100, df = 3)
+x = 1:100
+for (i in 1:100){
+  
+  x[i] = i*3/100;
+  
+}
+y = 3 + 3*x + error
+
+xyplot <- plot(x,y)
+```
+
+Attached below is a plot of the simulated data from the model $y = 3 + 3x + \text{error}$ where the vector of error terms are instances drawn from a $t(3)$ distribution:
+
+`r xyplot`
+
+(b) Fit a linear model, and compare the standard errors of the fitted coefficients to the standard errors estimated by the bootstrap method.
+
+```{r t_dist_error_fit, echo=FALSE, warning=FALSE}
+
+model <- lm(y~x)
+modelfit <- summary(model)
+t.dist_se <- modelfit$coefficients[2,2]
+
+modelcoefficients <- kable(modelfit$coefficients)
+
+xy <- data.frame(x,y)
+
+t.func = function(data,b,formula){  
+# b is the random indexes for the bootstrap sample
+	d = data[b,] 
+# returns the beta coefficient
+	return(lm(d[,1]~d[,2], data = d)$coef[2])  
+	}
+
+bootfit <- boot(data = xy, statistic = t.func, R = 100)
+
+```
+
+We obtain the regression model
+`r modelcoefficients`
+(with violated normality assumptions on the error) achieves a standard error of `r t.dist_se`, and 
+
+```{r print_4, echo=FALSE, warning=FALSE}
+(bootfit)
+```
+
+<!-- `r print(bootfit)` -->
+
+shows that bootstraping achieves a standard error of .0148688.
+
+
+(c) Now simulate where the errors are correlated. Compare the standard errors reported by the regression output (for the coefficients) to the bootstrap-estimated standard errors.
+
+```{r correlated_errors, echo=FALSE, include=FALSE, warning=FALSE}
+
+delta = rnorm(100,0,1)
+ep = 1:100
+ep[1] = delta[1]
+rho = .79
+
+for(i in 2:100){
+  ep[i] = rho*ep[i-1]+delta[i] 
+}
+
+X = 1:100
+for (i in 1:100){
+  X[i] = i*3/100;
+}
+Y = 3 + 3*X + ep
+
+XYplot <- plot(X,Y)
+
+
+model.correl <- lm(Y~X)
+fit.correl <- summary(model.correl)
+
+model.correl_se <- fit.correl$coefficients[2,2]
+
+model.correl_coefficients <- kable(fit.correl$coefficients)
+
+
+XY <- data.frame(X,Y)
+
+boot.correl <- boot(data = XY, statistic = t.func, R = 100)
+
+```
+
+We can simulate data $y = 3 + 3x + \epsilon$ similar to as discussed before, where the errors $\epsilon$ are correlated linearly: $\epsilon_1 = \delta_1$ follows a normal distribution about $0$, and similarly $\delta_i \sim N(0,1)$, but $\epsilon_{i+1} = \rho \epsilon_i + \delta_i$ (we pick $\rho = .79$ in the model below).
+
+```{r echo=FALSE} 
+XYplot <- plot(X,Y)
+
+```
+
+We obtain the regression model
+`r model.correl_coefficients`
+(with violated normality assumptions on the error) achieves a standard error of `r model.correl_se`, and 
+
+```{r print_2, echo=FALSE, warning=FALSE}
+(boot.correl)
+```
+
+<!-- `r print(bootfit)` -->
+
+shows that bootstraping achieves a standard error of 0.01323802.
