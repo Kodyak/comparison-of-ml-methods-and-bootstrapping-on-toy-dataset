@@ -1,7 +1,7 @@
 ---
-title: "Statistical Learning HW5"
-author: "Isaac Ahern"
-output: html_document
+title: "Statistical Learning Comparisons"
+author: "Kodyak"
+output: pdf_document
 ---
 
 
@@ -38,7 +38,7 @@ library(boot) # for bootstrap
 ```{r initialize_data, echo=FALSE, warning=FALSE}
 
 #import and view data
-ozo = read.table(file="http://pages.uoregon.edu/dlevin/DATA/ozo.txt",header=TRUE,row.names=1)
+ozo = read.table(file="ozo.txt",header=TRUE,row.names=1)
 attach(ozo)
 
 #plot(vh,wind,col=humidity,pch=19) #looking at data
